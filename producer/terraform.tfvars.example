@@ -21,3 +21,9 @@ csp_pin_value    = ""
 max_firewalls    = 1
 min_firewalls    = 1
 mirroring_mode   = false
+
+# Zonal affinity for the firewall load balancer. Keeps inspection traffic within the
+# consumer's source zone. Options: ZONAL_AFFINITY_DISABLED, ZONAL_AFFINITY_STAY_WITHIN_ZONE,
+# ZONAL_AFFINITY_SPILL_CROSS_ZONE. spillover_ratio (0.0-1.0) only applies to SPILL_CROSS_ZONE.
+zonal_affinity_spillover       = "ZONAL_AFFINITY_SPILL_CROSS_ZONE"
+zonal_affinity_spillover_ratio = 0.8

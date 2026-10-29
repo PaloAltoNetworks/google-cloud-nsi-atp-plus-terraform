@@ -6,12 +6,14 @@ terraform {
   required_version = "> 1.5, < 2.0"
   required_providers {
     google = {
-      source  = "hashicorp/google"
-      version = ">=4.64, < 6.18"
+      source = "hashicorp/google"
+      # >= 6.18 is required for network_pass_through_lb_traffic_policy / zonal_affinity
+      # on google_compute_region_backend_service (zonal affinity support).
+      version = ">= 6.18, < 8.0"
     }
     google-beta = {
       source  = "hashicorp/google-beta"
-      version = ">=4.64, < 6.18"
+      version = ">= 6.18, < 8.0"
     }
   }
 }
@@ -44,8 +46,8 @@ provider "google-beta" {
 # -------------------------------------------------------------------------------------
 
 locals {
-  prefix = var.prefix != null && var.prefix != "" ? "${var.prefix}-" : ""
-  public_key_path = "${path.module}/bootstrap_files/gcp_key.pub" 
+  prefix                      = var.prefix != null && var.prefix != "" ? "${var.prefix}-" : ""
+  public_key_path             = "${path.module}/bootstrap_files/gcp_key.pub"
   create_monitoring_dashboard = true
 }
 
@@ -142,6 +144,7 @@ resource "google_compute_region_health_check" "main" {
 
 // Create backend service.
 resource "google_compute_region_backend_service" "main" {
+  provider      = google-beta
   name          = "${local.prefix}panw-lb"
   protocol      = "UDP"
   network       = google_compute_network.data.id
@@ -151,14 +154,29 @@ resource "google_compute_region_backend_service" "main" {
     group          = google_compute_region_instance_group_manager.main.instance_group
     balancing_mode = "CONNECTION"
   }
+
+  # Zonal affinity keeps inspection traffic within the consumer's source zone.
+  # Disabled when zonal_affinity_spillover = ZONAL_AFFINITY_DISABLED.
+  dynamic "network_pass_through_lb_traffic_policy" {
+    for_each = var.zonal_affinity_spillover == "ZONAL_AFFINITY_DISABLED" ? [] : [1]
+    content {
+      zonal_affinity {
+        spillover       = var.zonal_affinity_spillover
+        spillover_ratio = var.zonal_affinity_spillover == "ZONAL_AFFINITY_SPILL_CROSS_ZONE" ? var.zonal_affinity_spillover_ratio : null
+      }
+    }
+  }
 }
 
+// Create a forwarding rule for each zone within var.region so each zone has a
+// zone-local inspection path (required for zonal affinity to be effective).
 resource "google_compute_forwarding_rule" "main" {
-  name                   = "${local.prefix}panw-lb-rule"
+  for_each               = toset(data.google_compute_zones.available.names)
+  name                   = "${local.prefix}panw-lb-rule-${each.key}"
   region                 = var.region
   load_balancing_scheme  = "INTERNAL"
   backend_service        = google_compute_region_backend_service.main.id
-  ip_address             = cidrhost(var.subnet_cidr_data, 4)
+  ip_address             = cidrhost(var.subnet_cidr_data, 11 + index(data.google_compute_zones.available.names, each.key))
   all_ports              = false
   ports                  = ["6081"]
   ip_protocol            = "UDP"
@@ -202,7 +220,7 @@ module "bootstrap" {
     "bootstrap_files/panup-all-antivirus-5120-5639"      = "content/panup-all-antivirus-5120-5639"
     "bootstrap_files/panupv2-all-contents-8952-9326"     = "content/panupv2-all-contents-8952-9326"
     "bootstrap_files/panupv3-all-wildfire-959874-963830" = "content/panupv3-all-wildfire-959874-963830"
-    "bootstrap_files/bootstrap.xml" = "config/bootstrap.xml"
+    "bootstrap_files/bootstrap.xml"                      = "config/bootstrap.xml"
   }
 }
 
@@ -319,19 +337,54 @@ resource "google_monitoring_dashboard" "dashboard" {
 
 # -------------------------------------------------------------------------------------
 # Create NSI Deployment Group and Deployment
+#
+# One deployment is created per zone (keyed off the per-zone forwarding rules) so that
+# each zone has a dedicated inspection path. The deployment group is global and
+# aggregates every zonal deployment. The deployment group ID is kept constant
+# ("${local.prefix}deployment-group") so the consumer's endpoint group reference does
+# not need to change when switching between intercept and mirroring modes.
+# -------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------
+#  If mirroring_mode = false, create the intercept deployment group and per-zone
+#  intercept deployments.
 # -------------------------------------------------------------------------------------
 
 resource "google_network_security_intercept_deployment_group" "main" {
-  provider                = google-beta
+  provider                      = google-beta
+  count                         = var.mirroring_mode ? 0 : 1
   intercept_deployment_group_id = "${local.prefix}deployment-group"
-  location                = "global"
-  network                 = google_compute_network.data.id
+  location                      = "global"
+  network                       = google_compute_network.data.id
 }
 
 resource "google_network_security_intercept_deployment" "main" {
-  provider               = google-beta
-  intercept_deployment_id = "${local.prefix}deployment"
-  location               = "${var.region}-a"
-  intercept_deployment_group = google_network_security_intercept_deployment_group.main.id
-  forwarding_rule        = google_compute_forwarding_rule.main.id
+  provider                   = google-beta
+  for_each                   = var.mirroring_mode ? {} : google_compute_forwarding_rule.main
+  intercept_deployment_id    = "${local.prefix}deployment-${each.key}"
+  location                   = each.key
+  intercept_deployment_group = google_network_security_intercept_deployment_group.main[0].id
+  forwarding_rule            = each.value.id
+}
+
+# -------------------------------------------------------------------------------------
+#  If mirroring_mode = true, create the mirroring deployment group and per-zone
+#  mirroring deployments instead.
+# -------------------------------------------------------------------------------------
+
+resource "google_network_security_mirroring_deployment_group" "main" {
+  provider                      = google-beta
+  count                         = var.mirroring_mode ? 1 : 0
+  mirroring_deployment_group_id = "${local.prefix}deployment-group"
+  location                      = "global"
+  network                       = google_compute_network.data.id
+}
+
+resource "google_network_security_mirroring_deployment" "main" {
+  provider                   = google-beta
+  for_each                   = var.mirroring_mode ? google_compute_forwarding_rule.main : {}
+  mirroring_deployment_id    = "${local.prefix}deployment-${each.key}"
+  location                   = each.key
+  mirroring_deployment_group = google_network_security_mirroring_deployment_group.main[0].id
+  forwarding_rule            = each.value.id
 }

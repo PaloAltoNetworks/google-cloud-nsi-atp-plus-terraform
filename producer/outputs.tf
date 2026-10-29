@@ -7,7 +7,7 @@ export DATA_SUBNET=${google_compute_subnetwork.data.name}
 export REGION=${var.region}
 export ZONE=${data.google_compute_zones.available.names[0]}
 export BACKEND_SERVICE=${google_compute_region_backend_service.main.self_link}
-export DEPLOYMENT_GROUP=${google_network_security_intercept_deployment_group.main.id}
+export DEPLOYMENT_GROUP=${var.mirroring_mode ? google_network_security_mirroring_deployment_group.main[0].id : google_network_security_intercept_deployment_group.main[0].id}
 EOT
 
 }

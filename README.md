@@ -35,47 +35,60 @@ The producer creates firewalls which serve as the backend service for an interna
 
 #### Zone Affinity Considerations
 
-The internal load balancer lacks zone-based affinity support. Therefore, consider the following architectures for your firewall deployment:
+The internal load balancer now supports Google Cloud's [**zonal affinity**](https://cloud.google.com/load-balancing/docs/internal/zonal-affinity) feature on its regional backend service, which lets you keep inspection traffic within the consumer's source zone (and control how it spills over to other zones). This Terraform plan creates **one forwarding rule per zone** in the region and links each to its own zonal intercept/mirroring **deployment**, so that every zone has a dedicated, zone-local inspection path. All zonal deployments are aggregated into a single global **deployment group**.
 
-* **Zone-Based**: Ensures traffic is inspected by a firewall in the same zone as the consumer's source zone.
-* **Cross-Zone**: Allows traffic to be inspected by any firewall within the same region as the traffic's source.
+Zonal affinity is configured on the backend service through the following producer variables:
+
+| Variable | Description | Default |
+| :---- | :---- | :---- |
+| `zonal_affinity_spillover` | Zonal affinity mode. One of `ZONAL_AFFINITY_DISABLED`, `ZONAL_AFFINITY_STAY_WITHIN_ZONE`, or `ZONAL_AFFINITY_SPILL_CROSS_ZONE`. | `ZONAL_AFFINITY_SPILL_CROSS_ZONE` |
+| `zonal_affinity_spillover_ratio` | Threshold (`0.0`–`1.0`) for keeping traffic in the client's zone. Only applies when `zonal_affinity_spillover = ZONAL_AFFINITY_SPILL_CROSS_ZONE`. When the proportion of healthy, eligible backends in the client's zone drops below this value, new connections spill over to other zones. | `0.8` |
+
+The supported modes map to the following deployment behaviors:
+
+* **`ZONAL_AFFINITY_STAY_WITHIN_ZONE`** (zone-based): Traffic is always inspected by a firewall in the same zone as the consumer's source zone, and is dropped within the zone rather than spilling over.
+* **`ZONAL_AFFINITY_SPILL_CROSS_ZONE`** (zone-based with spillover): Traffic is kept local while enough healthy backends exist in the zone; once the healthy-backend proportion falls below `zonal_affinity_spillover_ratio`, new connections spill over to firewalls in other zones within the region.
+* **`ZONAL_AFFINITY_DISABLED`** (cross-zone): Traffic may be inspected by any firewall within the same region as the traffic's source (the previous behavior).
 
 <table>
   <tr>
     <!-- Title cell with left alignment -->
-    <th colspan="2" align="left">Zone-Based Deployment</th>
+    <th colspan="2" align="left">Zone-Based Deployment (zonal affinity enabled)</th>
   </tr>
   <tr>
     <td width="35%"><img src="images/diagram_zone.png" width="100%"></td>
     <td width="65%">
       <ol>
-        <li>Deploy the firewalls to a zone instance group corresponding to the source zone of the consumer.</li>
-        <li>Add the instance group to a backend service.</li>
-        <li>Create a forwarding rule targeting the backend service.</li>
-        <li>Link the forwarding rule to an intercept/mirroring deployment that matches the zone you are inspecting.</li>
-        <li>Add the deployment to a deployment group.</li>
-        <li><b>Repeat steps 1-5</b> for each zone requiring inspection.</li>
+        <li>Deploy the firewalls to a regional instance group that spans every zone in the region.</li>
+        <li>Add the instance group to a backend service and enable <b>zonal affinity</b> (<code>ZONAL_AFFINITY_STAY_WITHIN_ZONE</code> or <code>ZONAL_AFFINITY_SPILL_CROSS_ZONE</code>).</li>
+        <li>Create a forwarding rule per zone targeting the backend service.</li>
+        <li>Link each forwarding rule to an intercept/mirroring deployment that matches the zone you are inspecting.</li>
+        <li>Aggregate all zonal deployments into a single deployment group.</li>
       </ol>
+      <i>Terraform performs steps 3-5 automatically for every zone in <code>var.region</code>.</i>
     </td>
   </tr>
   <tr>
     <!-- Title cell with left alignment -->
-    <th colspan="2" align="left">Cross-Zone Deployment</th>
+    <th colspan="2" align="left">Cross-Zone Deployment (zonal affinity disabled)</th>
   </tr>
   <tr>
     <td width="35%"><img src="images/diagram_region.png" width="100%"></td>
     <td width="65%">
       <ol>
         <li>Deploy the firewalls to a regional instance group matching the source region of the consumer.</li>
-        <li>Add the instance group to a backend service.</li>
-        <li>Create a forwarding rule targeting the backend service.</li>
-        <li>Link the forwarding rule to an intercept/mirroring deployment matching the zone you wish to inspect.</li>
-        <li>Add the deployment to the deployment group.</li>
-        <li><b>Repeat steps 3-5</b> for each zone requiring inspection.</li>
+        <li>Add the instance group to a backend service with <code>zonal_affinity_spillover = ZONAL_AFFINITY_DISABLED</code>.</li>
+        <li>Create a forwarding rule per zone targeting the backend service.</li>
+        <li>Link each forwarding rule to an intercept/mirroring deployment matching the zone you wish to inspect.</li>
+        <li>Aggregate all zonal deployments into a single deployment group.</li>
       </ol>
+      <i>Terraform performs steps 3-5 automatically for every zone in <code>var.region</code>.</i>
     </td>
   </tr>
 </table>
+
+> [!NOTE]
+> A forwarding rule is created for every zone in the region, each consuming one IP from `subnet_cidr_data` starting at host offset `.11`. The default `/28` dataplane subnet supports standard 3-4 zone regions; widen `subnet_cidr_data` if your region has more zones.
 
 <br>
 

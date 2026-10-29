@@ -105,7 +105,7 @@ variable "metadata" {
 
 
 variable "vmseries_metrics" {
-    default = {
+  default = {
     "custom.googleapis.com/VMSeries/panSessionActive" = {
       target = 100
     }
@@ -117,4 +117,25 @@ variable "mirroring_mode" {
   description = "If true, configures the forwarding rule for packet mirroring. If false, configures it for in-band traffic."
   type        = bool
   default     = false
+}
+
+
+variable "zonal_affinity_spillover" {
+  description = "Zonal affinity mode for the firewall load balancer's backend service. ZONAL_AFFINITY_DISABLED turns the feature off, ZONAL_AFFINITY_STAY_WITHIN_ZONE keeps traffic inside the client's zone, and ZONAL_AFFINITY_SPILL_CROSS_ZONE keeps traffic local until the healthy-backend proportion drops below zonal_affinity_spillover_ratio."
+  type        = string
+  default     = "ZONAL_AFFINITY_SPILL_CROSS_ZONE"
+  validation {
+    condition     = contains(["ZONAL_AFFINITY_DISABLED", "ZONAL_AFFINITY_STAY_WITHIN_ZONE", "ZONAL_AFFINITY_SPILL_CROSS_ZONE"], var.zonal_affinity_spillover)
+    error_message = "zonal_affinity_spillover must be one of ZONAL_AFFINITY_DISABLED, ZONAL_AFFINITY_STAY_WITHIN_ZONE, or ZONAL_AFFINITY_SPILL_CROSS_ZONE."
+  }
+}
+
+variable "zonal_affinity_spillover_ratio" {
+  description = "Spillover ratio (0.0-1.0) used when zonal_affinity_spillover = ZONAL_AFFINITY_SPILL_CROSS_ZONE. When the proportion of healthy, eligible backends in the client's zone falls below this value, new connections spill over to other zones."
+  type        = number
+  default     = 0.8
+  validation {
+    condition     = var.zonal_affinity_spillover_ratio >= 0 && var.zonal_affinity_spillover_ratio <= 1
+    error_message = "zonal_affinity_spillover_ratio must be between 0.0 and 1.0."
+  }
 }
