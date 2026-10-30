@@ -1,7 +1,7 @@
-# Terraform Deployment Guide for Software NGFW with Network Security Integration
+# Terraform Deployment Guide for Frontier Virtual Patching with Network Security Integration
 
 
-This tutorial shows how to deploy Palo Alto Networks Software Firewalls in Google Cloud, utilizing either the *in-line* or *out-of-band* deployment model within the [Network Security Integration](https://cloud.google.com/network-security-integration/docs/nsi-overview) (NSI).  NSI enables you to gain  visibility and security for your VPC network traffic, without requiring any changes to your network infrastructure.  
+This tutorial shows how to deploy Palo Alto Networks Software Firewalls in Google Cloud, utilizing either the *in-line* or *out-of-band* deployment model within the [Network Security Integration](https://cloud.google.com/network-security-integration/docs/nsi-overview) (NSI), and how to enable **Advanced Threat Prevention Plus (ATP Plus)** with **Frontier Virtual Patching (FVP)** on the deployed NGFWs.  NSI enables you to gain visibility and security for your VPC network traffic, without requiring any changes to your network infrastructure.  Frontier Virtual Patching extends the firewall's inline protections by proactively discovering unknown vulnerabilities and preemptively shielding them before official vendor patches are available.  
 
 The functionality of each model is summarized as follows:
 
@@ -180,7 +180,7 @@ In the `producer` directory, use the terraform plan to automatically create the 
 1. In [Cloud Shell](https://shell.cloud.google.com), clone the repository change to the `producer` directory. 
 
     ```
-    git clone https://github.com/PaloAltoNetworks/google-cloud-nsi-ui-demo.git
+    git clone https://github.com/PaloAltoNetworks/google-cloud-nsi-atp-plus-terraform.git
     cd google-cloud-nsi-ui-demo/producer
     ```
 
@@ -361,9 +361,9 @@ Simulate pseudo-malicious traffic for both east-west and north-south traffic flo
 <br>
 
 
-# Configure the NGFW for ATP Plus (Full Visibility Protection)
+# Configure the NGFW for ATP Plus (Frontier Virtual Patching)
 
-Advanced Threat Prevention Plus (ATP Plus) adds **Full Visibility Protection (FVP)** to the firewall by enabling the **Advanced Forwarding** mode, which forwards extracted artifacts to the Palo Alto Networks cloud for deeper analysis. The following steps show how to license and configure a Software NGFW (VM-Series) so it works with ATP Plus. These steps are performed directly on the firewall (PAN-OS) and the Customer Support Portal / SCM — they are independent of the Terraform deployment above.
+Advanced Threat Prevention Plus (ATP Plus) adds **Frontier Virtual Patching (FVP)** to the firewall by enabling the **Advanced Forwarding** mode. Frontier Virtual Patching proactively discovers previously unknown vulnerabilities and preemptively protects them from exploitation before official vendor patches are available, extending the firewall's inline Advanced Threat Prevention protections. The following steps show how to license and configure a Software NGFW (VM-Series) so it works with ATP Plus. These steps are performed directly on the firewall (PAN-OS) and the Customer Support Portal / SCM — they are independent of the Terraform deployment above.
 
 > [!NOTE]
 > ATP Plus includes Advanced Threat Prevention (ATP) capabilities in addition to FVP. On a deployment profile, only **one** of "Advanced Threat Prevention" or "Advanced Threat Prevention Plus" can be selected at a time. FVP/Advanced Forwarding settings require **PAN-OS 12.2.4 or later**.
