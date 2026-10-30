@@ -35,60 +35,47 @@ The producer creates firewalls which serve as the backend service for an interna
 
 #### Zone Affinity Considerations
 
-The internal load balancer now supports Google Cloud's [**zonal affinity**](https://cloud.google.com/load-balancing/docs/internal/zonal-affinity) feature on its regional backend service, which lets you keep inspection traffic within the consumer's source zone (and control how it spills over to other zones). This Terraform plan creates **one forwarding rule per zone** in the region and links each to its own zonal intercept/mirroring **deployment**, so that every zone has a dedicated, zone-local inspection path. All zonal deployments are aggregated into a single global **deployment group**.
+The internal load balancer lacks zone-based affinity support. Therefore, consider the following architectures for your firewall deployment:
 
-Zonal affinity is configured on the backend service through the following producer variables:
-
-| Variable | Description | Default |
-| :---- | :---- | :---- |
-| `zonal_affinity_spillover` | Zonal affinity mode. One of `ZONAL_AFFINITY_DISABLED`, `ZONAL_AFFINITY_STAY_WITHIN_ZONE`, or `ZONAL_AFFINITY_SPILL_CROSS_ZONE`. | `ZONAL_AFFINITY_SPILL_CROSS_ZONE` |
-| `zonal_affinity_spillover_ratio` | Threshold (`0.0`–`1.0`) for keeping traffic in the client's zone. Only applies when `zonal_affinity_spillover = ZONAL_AFFINITY_SPILL_CROSS_ZONE`. When the proportion of healthy, eligible backends in the client's zone drops below this value, new connections spill over to other zones. | `0.8` |
-
-The supported modes map to the following deployment behaviors:
-
-* **`ZONAL_AFFINITY_STAY_WITHIN_ZONE`** (zone-based): Traffic is always inspected by a firewall in the same zone as the consumer's source zone, and is dropped within the zone rather than spilling over.
-* **`ZONAL_AFFINITY_SPILL_CROSS_ZONE`** (zone-based with spillover): Traffic is kept local while enough healthy backends exist in the zone; once the healthy-backend proportion falls below `zonal_affinity_spillover_ratio`, new connections spill over to firewalls in other zones within the region.
-* **`ZONAL_AFFINITY_DISABLED`** (cross-zone): Traffic may be inspected by any firewall within the same region as the traffic's source (the previous behavior).
+* **Zone-Based**: Ensures traffic is inspected by a firewall in the same zone as the consumer's source zone.
+* **Cross-Zone**: Allows traffic to be inspected by any firewall within the same region as the traffic's source.
 
 <table>
   <tr>
     <!-- Title cell with left alignment -->
-    <th colspan="2" align="left">Zone-Based Deployment (zonal affinity enabled)</th>
+    <th colspan="2" align="left">Zone-Based Deployment</th>
   </tr>
   <tr>
     <td width="35%"><img src="images/diagram_zone.png" width="100%"></td>
     <td width="65%">
       <ol>
-        <li>Deploy the firewalls to a regional instance group that spans every zone in the region.</li>
-        <li>Add the instance group to a backend service and enable <b>zonal affinity</b> (<code>ZONAL_AFFINITY_STAY_WITHIN_ZONE</code> or <code>ZONAL_AFFINITY_SPILL_CROSS_ZONE</code>).</li>
-        <li>Create a forwarding rule per zone targeting the backend service.</li>
-        <li>Link each forwarding rule to an intercept/mirroring deployment that matches the zone you are inspecting.</li>
-        <li>Aggregate all zonal deployments into a single deployment group.</li>
+        <li>Deploy the firewalls to a zone instance group corresponding to the source zone of the consumer.</li>
+        <li>Add the instance group to a backend service.</li>
+        <li>Create a forwarding rule targeting the backend service.</li>
+        <li>Link the forwarding rule to an intercept/mirroring deployment that matches the zone you are inspecting.</li>
+        <li>Add the deployment to a deployment group.</li>
+        <li><b>Repeat steps 1-5</b> for each zone requiring inspection.</li>
       </ol>
-      <i>Terraform performs steps 3-5 automatically for every zone in <code>var.region</code>.</i>
     </td>
   </tr>
   <tr>
     <!-- Title cell with left alignment -->
-    <th colspan="2" align="left">Cross-Zone Deployment (zonal affinity disabled)</th>
+    <th colspan="2" align="left">Cross-Zone Deployment</th>
   </tr>
   <tr>
     <td width="35%"><img src="images/diagram_region.png" width="100%"></td>
     <td width="65%">
       <ol>
         <li>Deploy the firewalls to a regional instance group matching the source region of the consumer.</li>
-        <li>Add the instance group to a backend service with <code>zonal_affinity_spillover = ZONAL_AFFINITY_DISABLED</code>.</li>
-        <li>Create a forwarding rule per zone targeting the backend service.</li>
-        <li>Link each forwarding rule to an intercept/mirroring deployment matching the zone you wish to inspect.</li>
-        <li>Aggregate all zonal deployments into a single deployment group.</li>
+        <li>Add the instance group to a backend service.</li>
+        <li>Create a forwarding rule targeting the backend service.</li>
+        <li>Link the forwarding rule to an intercept/mirroring deployment matching the zone you wish to inspect.</li>
+        <li>Add the deployment to the deployment group.</li>
+        <li><b>Repeat steps 3-5</b> for each zone requiring inspection.</li>
       </ol>
-      <i>Terraform performs steps 3-5 automatically for every zone in <code>var.region</code>.</i>
     </td>
   </tr>
 </table>
-
-> [!NOTE]
-> A forwarding rule is created for every zone in the region, each consuming one IP from `subnet_cidr_data` starting at host offset `.11`. The default `/28` dataplane subnet supports standard 3-4 zone regions; widen `subnet_cidr_data` if your region has more zones.
 
 <br>
 
@@ -165,8 +152,6 @@ The network firewall policy associated with the `consumer-vpc` contains two rule
 
 ## Requirements
 
-> [!WARNING] 
-> The *in-line* model is currently in private preview and must be enabled for your Google Cloud account. 
 
 1. A Google Cloud project.
 2. Access to [Cloud Shell](https://shell.cloud.google.com). 
@@ -372,6 +357,129 @@ Simulate pseudo-malicious traffic for both east-west and north-south traffic flo
 4. On the firewall, go to **Monitor → Threat** to confirm the firewall prevented the north/south and east/west threats generated by the `client-vm` .
 
     <img src="images/threat_gce.png" width="100%">
+
+<br>
+
+
+# Configure the NGFW for ATP Plus (Full Visibility Protection)
+
+Advanced Threat Prevention Plus (ATP Plus) adds **Full Visibility Protection (FVP)** to the firewall by enabling the **Advanced Forwarding** mode, which forwards extracted artifacts to the Palo Alto Networks cloud for deeper analysis. The following steps show how to license and configure a Software NGFW (VM-Series) so it works with ATP Plus. These steps are performed directly on the firewall (PAN-OS) and the Customer Support Portal / SCM — they are independent of the Terraform deployment above.
+
+> [!NOTE]
+> ATP Plus includes Advanced Threat Prevention (ATP) capabilities in addition to FVP. On a deployment profile, only **one** of "Advanced Threat Prevention" or "Advanced Threat Prevention Plus" can be selected at a time. FVP/Advanced Forwarding settings require **PAN-OS 12.2.4 or later**.
+
+<br>
+
+## 1. Acquire the ATP Plus Subscription
+
+* On a **hardware appliance**, acquire a trial license for ATP Plus by following this [KB article](https://knowledgebase.paloaltonetworks.com/articles/en_US/Knowledge/How-to-Activate-Trial-Licenses).
+* On a **VM-Series firewall**, [edit the deployment profile](https://docs.paloaltonetworks.com/vm-series/10-1/vm-series-deployment/license-the-vm-series-firewall/software-ngfw/manage-a-deployment-profile) and select **"Advanced Threat Prevention Plus"**. Make sure you **uncheck "Advanced Threat Prevention"**, because only one can be selected. ATP Plus includes ATP as well, along with the FVP capability. See the example below:
+
+<img src="images/atp_deployment_profile.png" width="100%">
+
+<br>
+
+## 2. Activate the ATP Plus Subscription License
+
+* For new devices, [install the device certificate](https://docs.paloaltonetworks.com/ngfw/administration/certificate-management/certificate-deployment/install-device-certificate).
+* Activate the ATP Plus subscription license by following this [Tech Doc](https://docs.paloaltonetworks.com/ngfw/getting-started/ngfw-compatible-subscriptions/activate-subscription-licenses).
+
+<img src="images/atp_activate_license.png" width="100%">
+
+* Now onboard this firewall on your SCM tenant.
+
+<br>
+
+## 3. Review the Change in Content Cloud Settings
+
+On the PAN-OS UI, navigate to **DEVICE > Setup > Content-ID** and locate **"Content Cloud Settings"**.
+
+**Pre-12.2.4** — Advanced Threat Prevention (ATP) default settings:
+
+<img src="images/atp_content_cloud_pre1224.png" width="100%">
+
+**12.2.4 and above** — ATP Plus default settings. Notice **"Enable Advanced Forwarding"**:
+
+<img src="images/atp_content_cloud_1224.png" width="100%">
+
+> [!NOTE]
+> To learn more about these settings, click "?" at the top right to review the in-product help.
+
+<br>
+
+## 4. Verify the Changes in the Firewall CLI
+
+**Pre-12.2.4** (ATP) — the WildFire upload (`WifUpload`) security client is connected to the cloud and in a ready state:
+
+<img src="images/atp_cli_wifupload_atp.png" width="100%">
+
+**12.2.4** (ATP Plus) — the `WifUpload` security client is disconnected and disabled due to Advanced Forwarding mode:
+
+<img src="images/atp_cli_wifupload_atpplus.png" width="100%">
+
+New FVP-related commands to check the cloud connection status and FVP configuration:
+
+```
+admin@PA-VM> show paed
+  > cfg-sync-status    Show recent config sync status
+  > cloud-status       Show discovery cloud connection status
+  > conn-health        Show recent conn health status
+  > device-info        Show device info used in discovery
+  > discovery-status   Show recent discovery status
+  > fqdns              Show current FQDNs
+  > jobs               Show paed job history
+
+admin@PA-VM# show deviceconfig setting pae-discovery
+```
+
+<br>
+
+## 5. Allow all FVP FQDNs (Optional)
+
+Only for existing ATP configurations in some production deployments — since the FVP FQDNs are different from the ATP FQDNs, ensure that all FQDNs used in the FVP configuration settings shown above are allowed by your existing security policies.
+
+For a more detailed explanation, refer to [Enable Advanced Forwarding](https://docs.paloaltonetworks.com/advanced-threat-prevention/getting-started/configure-advanced-forwarding-settings).
+
+<br>
+
+## 6. Follow the FVP Configuration Steps
+
+For a standalone firewall, the configuration screenshots are given below:
+
+<img src="images/atp_fvp_config_1.png" width="100%">
+
+<img src="images/atp_fvp_config_2.png" width="100%">
+
+<img src="images/atp_fvp_config_3.png" width="100%">
+
+<img src="images/atp_fvp_config_4.png" width="100%">
+
+<br>
+
+## 7. View Threat Events
+
+For a standalone firewall, the equivalent screenshots are given below:
+
+<img src="images/atp_threat_events_1.png" width="100%">
+
+<img src="images/atp_threat_events_2.png" width="100%">
+
+<br>
+
+## 8. Fetch the Cloud Report via Threat Vault API
+
+If you are using the firewall UI, the Cloud Report can be fetched from the Threat Vault API as shown below.
+
+Required information:
+
+* **Threat Vault API Key** (from your support portal account)
+* **Cloud Report ID** (from the Threat Log)
+
+<img src="images/atp_cloud_report_api.png" width="100%">
+
+Where can I get the "Threat Vault API Key"?
+
+<img src="images/atp_threat_vault_api_key.png" width="100%">
 
 <br>
 
