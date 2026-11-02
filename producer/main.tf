@@ -217,9 +217,9 @@ module "bootstrap" {
   files = {
     "bootstrap_files/init-cfg.txt"                       = "config/init-cfg.txt"
     "bootstrap_files/authcodes"                          = "license/authcodes"
-    "bootstrap_files/panup-all-antivirus-5120-5639"      = "content/panup-all-antivirus-5120-5639"
-    "bootstrap_files/panupv2-all-contents-8952-9326"     = "content/panupv2-all-contents-8952-9326"
-    "bootstrap_files/panupv3-all-wildfire-959874-963830" = "content/panupv3-all-wildfire-959874-963830"
+    # "bootstrap_files/panup-all-antivirus-5120-5639"      = "content/panup-all-antivirus-5120-5639"
+    # "bootstrap_files/panupv2-all-contents-8952-9326"     = "content/panupv2-all-contents-8952-9326"
+    # "bootstrap_files/panupv3-all-wildfire-959874-963830" = "content/panupv3-all-wildfire-959874-963830"
     "bootstrap_files/bootstrap.xml"                      = "config/bootstrap.xml"
   }
 }

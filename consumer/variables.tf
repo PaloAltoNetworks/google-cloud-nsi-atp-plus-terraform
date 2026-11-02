@@ -39,7 +39,13 @@ variable "producer_project_id" {
 }
 
 variable "deployment_group_id" {
-  description = "Deployment Group ID from the producer project."
+  description = "Deployment Group ID from the producer project. Only used when deployment_group is empty."
   type        = string
   default     = "deployment-group"
+}
+
+variable "deployment_group" {
+  description = "Full resource path of the producer's deployment group, e.g. projects/<producer-project>/locations/global/interceptDeploymentGroups/<name>. This matches the $DEPLOYMENT_GROUP value exported by the producer `terraform output`. When set (e.g. via TF_VAR_deployment_group), it is used directly and producer_project_id / deployment_group_id / prefix are ignored for the endpoint group reference."
+  type        = string
+  default     = ""
 }

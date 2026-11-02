@@ -172,7 +172,7 @@ resource "google_compute_instance" "client" {
   zone                      = data.google_compute_zones.available.names[0]
   can_ip_forward            = false
   allow_stopping_for_update = true
-  tags             = ["client-vm"]
+  tags                      = ["client-vm"]
   boot_disk {
     initialize_params {
       image = "ubuntu-os-cloud/ubuntu-2204-lts"
@@ -208,9 +208,9 @@ resource "google_compute_instance" "client" {
 # -------------------------------------------------------------------------------------
 
 module "gke" {
-  count  = var.create_gke ? 1 : 0
-  source = "terraform-google-modules/kubernetes-engine/google"
-  version                    = "36.1.0"
+  count                       = var.create_gke ? 1 : 0
+  source                      = "terraform-google-modules/kubernetes-engine/google"
+  version                     = "36.1.0"
   project_id                  = var.project_id
   name                        = "${local.prefix}cluster1"
   regional                    = false
@@ -261,7 +261,7 @@ resource "google_secret_manager_secret" "ngfw_ca" {
   }
 
   labels = {
-    purpose = "ngfw-root-ca"
+    purpose    = "ngfw-root-ca"
     managed_by = "terraform"
   }
 }
@@ -291,21 +291,25 @@ resource "google_secret_manager_secret_iam_member" "default_gce_access" {
 
 locals {
   producer_project = var.producer_project_id != "" ? var.producer_project_id : var.project_id
+
+  # Prefer the full deployment group path exported by the producer ($DEPLOYMENT_GROUP via
+  # TF_VAR_deployment_group). Otherwise, reconstruct it from the individual variables.
+  intercept_deployment_group = var.deployment_group != "" ? var.deployment_group : "projects/${local.producer_project}/locations/global/interceptDeploymentGroups/${var.prefix != null && var.prefix != "" ? "${var.prefix}-" : ""}${var.deployment_group_id}"
 }
 
 resource "google_network_security_intercept_endpoint_group" "main" {
-  provider                     = google-beta
-  intercept_endpoint_group_id  = "${local.prefix}epg"
-  location                     = "global"
-  intercept_deployment_group   = "projects/${local.producer_project}/locations/global/interceptDeploymentGroups/${var.prefix != null && var.prefix != "" ? "${var.prefix}-" : ""}${var.deployment_group_id}"
+  provider                    = google-beta
+  intercept_endpoint_group_id = "${local.prefix}epg"
+  location                    = "global"
+  intercept_deployment_group  = local.intercept_deployment_group
 }
 
 resource "google_network_security_intercept_endpoint_group_association" "main" {
-  provider                                   = google-beta
-  intercept_endpoint_group_association_id    = "${local.prefix}epg-assoc"
-  location                                   = "global"
-  network                                    = google_compute_network.main.id
-  intercept_endpoint_group                   = google_network_security_intercept_endpoint_group.main.id
+  provider                                = google-beta
+  intercept_endpoint_group_association_id = "${local.prefix}epg-assoc"
+  location                                = "global"
+  network                                 = google_compute_network.main.id
+  intercept_endpoint_group                = google_network_security_intercept_endpoint_group.main.id
 }
 
 resource "google_network_security_security_profile" "main" {
@@ -322,12 +326,12 @@ resource "google_network_security_security_profile" "main" {
 }
 
 resource "google_network_security_security_profile_group" "main" {
-  provider                  = google-beta
-  name                      = "${local.prefix}spg"
-  parent                    = "projects/${var.project_id}"
-  location                  = "global"
-  description               = "NSI Intercept Security Profile Group"
-  custom_intercept_profile  = google_network_security_security_profile.main.id
+  provider                 = google-beta
+  name                     = "${local.prefix}spg"
+  parent                   = "projects/${var.project_id}"
+  location                 = "global"
+  description              = "NSI Intercept Security Profile Group"
+  custom_intercept_profile = google_network_security_security_profile.main.id
 }
 
 resource "google_compute_network_firewall_policy" "main" {

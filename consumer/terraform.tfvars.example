@@ -1,7 +1,24 @@
-project_id                 = ""
-mgmt_allow_ips             = ["0.0.0.0/0"]
-region                     = "us-west1"
-create_gke                 = false 
-prefix                     = ""
-producer_project_id        = ""
-deployment_group_id        = "deployment-group"
+# -------------------------------------------------------------------------------------
+# Consumer-specific settings - edit these.
+# -------------------------------------------------------------------------------------
+project_id     = ""                 # consumer project ID
+mgmt_allow_ips = ["0.0.0.0/0"]
+region         = "us-west1"
+create_gke     = false
+prefix         = ""
+
+# -------------------------------------------------------------------------------------
+# Producer connection values - do NOT set them here.
+#
+# They are read directly from the environment variables exported by the producer's
+# `terraform output`, using Terraform's built-in TF_VAR_* mechanism. After running the
+# producer exports, map them to the consumer variables before `terraform apply`:
+#
+#   export TF_VAR_producer_project_id="$PRODUCER_PROJECT"
+#   export TF_VAR_deployment_group="$DEPLOYMENT_GROUP"
+#   export TF_VAR_region="$REGION"
+#
+# `deployment_group` takes the FULL $DEPLOYMENT_GROUP path and is used as-is.
+# The legacy `producer_project_id` / `deployment_group_id` variables are only used when
+# TF_VAR_deployment_group is unset.
+# -------------------------------------------------------------------------------------

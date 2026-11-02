@@ -288,10 +288,28 @@ In the `consumer` directory, use the terraform plan to create a consumer environ
     | `mgmt_allowed_ips` | A list of IPv4 addresses that can access the VMs on `TCP:80,22`. | `["0.0.0.0/0"]` |
     | `region` | The region to deploy the consumer resources. | `us-west1` |
     | `create_gke` | Whether to create the GKE cluster. | `true` |
-    | `producer_project_id` | The project ID of the producer environment. | `null` |
-    | `deployment_group_id` | The ID of the deployment group created in the producer project. | `deployment-group` |
+    | `producer_project_id` | The project ID of the producer environment. Only used when `deployment_group` is empty. | `null` |
+    | `deployment_group_id` | The ID of the deployment group created in the producer project. Only used when `deployment_group` is empty. | `deployment-group` |
+    | `deployment_group` | The full resource path of the producer's deployment group (the `$DEPLOYMENT_GROUP` value exported by the producer). When set, it is used directly. | `""` |
 
-4. Initialize and apply the terraform plan.
+4. (Optional) Instead of hand-editing the producer connection values, reuse the environment variables exported by the producer's `terraform output`. Paste the producer exports, then bridge the values the consumer needs into Terraform's `TF_VAR_*` variables:
+
+    ```
+    # Producer exports (from `terraform output` in the producer directory), e.g.:
+    export PRODUCER_PROJECT=your-project-id
+    export REGION=us-west1
+    export DEPLOYMENT_GROUP=projects/your-project-id/locations/global/interceptDeploymentGroups/demo-deployment-group
+
+    # Bridge them so Terraform reads them automatically:
+    export TF_VAR_producer_project_id="$PRODUCER_PROJECT"
+    export TF_VAR_deployment_group="$DEPLOYMENT_GROUP"
+    export TF_VAR_region="$REGION"
+    ```
+
+    > [!NOTE]
+    > Values provided via `TF_VAR_*` take precedence over the defaults in `variables.tf`. If you also set them in `terraform.tfvars`, the `.tfvars` values win, so leave the producer connection values unset in `terraform.tfvars` when using this method.
+
+5. Initialize and apply the terraform plan.
 
     ```
     terraform init
@@ -300,7 +318,7 @@ In the `consumer` directory, use the terraform plan to create a consumer environ
 
     Enter `yes` to apply the plan.
 
-5. After the apply completes, terraform displays the following message:
+6. After the apply completes, terraform displays the following message:
 
     <pre>
     export <b>CONSUMER_PROJECT</b>=<i>your-project-id</i>
