@@ -47,7 +47,7 @@ provider "google-beta" {
 
 locals {
   prefix                      = var.prefix != null && var.prefix != "" ? "${var.prefix}-" : ""
-  public_key_path             = "${path.module}/bootstrap_files/gcp_key.pub"
+  public_key_path             = "${path.module}/bootstrap_files/my_palo_key.pub"
   create_monitoring_dashboard = true
 }
 
@@ -217,10 +217,7 @@ module "bootstrap" {
   files = {
     "bootstrap_files/init-cfg.txt"                       = "config/init-cfg.txt"
     "bootstrap_files/authcodes"                          = "license/authcodes"
-    # "bootstrap_files/panup-all-antivirus-5120-5639"      = "content/panup-all-antivirus-5120-5639"
-    # "bootstrap_files/panupv2-all-contents-8952-9326"     = "content/panupv2-all-contents-8952-9326"
-    # "bootstrap_files/panupv3-all-wildfire-959874-963830" = "content/panupv3-all-wildfire-959874-963830"
-    "bootstrap_files/bootstrap.xml"                      = "config/bootstrap.xml"
+    # "bootstrap_files/bootstrap.xml"                      = "config/bootstrap.xml"
   }
 }
 
@@ -233,16 +230,8 @@ resource "google_compute_instance_template" "main" {
   can_ip_forward   = true
 
   metadata = {
-    type                                  = "dhcp-client"
-    dhcp-send-client-id                   = "yes"
-    dhcp-accept-server-hostname           = "yes"
-    dhcp-accept-server-domain             = "yes"
-    vm-series-auto-registration-pin-id    = var.csp_pin_id
-    vm-series-auto-registration-pin-value = var.csp_pin_value
-    authcodes                             = var.csp_authcodes
-    dns-primary                           = "169.254.169.254"
     vmseries-bootstrap-gce-storagebucket  = module.bootstrap.bucket_name
-    # ssh-keys                             = "${file(local.public_key_path)}"
+    ssh-keys                             = "${file(local.public_key_path)}"
   }
 
   network_interface {

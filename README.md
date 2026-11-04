@@ -19,7 +19,37 @@ This tutorial is intended for network administrators, solution architects, and s
 
 NSI follows a *producer-consumer* model, where the *consumer* consumes services provided by the *producer*. The *producer* contains the cloud infrastructure responsible for inspecting network traffic, while the *consumer* environment contains the cloud resources that require inspection.
 
+The end-to-end architecture — the NSI producer/consumer firewalls on Google Cloud combined with Advanced Threat Prevention Plus (ATP Plus) and Frontier Virtual Patching (FVP) — is shown below:
+
+<img src="images/atpp.png" width="100%">
+
+The underlying NSI traffic-steering model between the consumer and producer is shown below:
+
 <img src="images/diagram.png" width="100%">
+
+### Frontier Virtual Patching
+
+**Frontier Virtual Patching (FVP)** is the capability added by the **Advanced Threat Prevention Plus (ATP Plus)** subscription. It delivers cloud-based, *pre-disclosure* vulnerability protection: the firewall preemptively shields your workloads against vulnerabilities **weeks or months before** they are publicly disclosed or an official vendor patch exists. FVP complements the real-time, inline detection of Advanced Threat Prevention (ATP) — together they close the "dual exposure gap" between when a vulnerability becomes exploitable and when it is patched.
+
+**How it works**
+
+1. **Proactive discovery** — [NOVA](https://www.paloaltonetworks.com/blog/network-security/harnessing-ai-for-prevention-introducing-frontier-virtual-patching/) (the Network and Open-Source Vulnerability Analyzer, powered by Frontier AI) automatically discovers, validates, and reports previously unknown vulnerabilities across open-source and closed-source software before threat actors find them.
+2. **Pre-disclosure intelligence** — the [Critical Defense Program (CDP)](https://www.paloaltonetworks.com/critical-defense-program) securely shares embargoed vulnerability intelligence from software vendors, enabling coordinated network-level "virtual patches" (also called *air cover*).
+3. **Preemptive protections** — validated protections are published to the **Frontier Virtual Patching cloud service** and streamed to the firewall (typically within hours of discovery) using *Vaulted Protection* technology, so they are in place before public disclosure.
+4. **Inline enforcement** — the NGFW applies these protections inline through a **Vulnerability Protection profile** (with the Frontier Virtual Patching settings enabled) that is attached to your security policy rules, blocking exploitation attempts in real time.
+
+**How to achieve it**
+
+To enable FVP on the deployed NGFWs:
+
+1. Activate the **ATP Plus (ATP+)** subscription license on the firewall. Once active, a **Frontier Virtual Patching** tab becomes available in the Vulnerability Protection profile.
+2. Ensure the firewall is running **PAN-OS 12.2.4 or later**.
+3. Update the content release version to **9157-10279 or later**.
+4. Verify that **Advanced Forwarding** is active on the firewall (enabled by default on PAN-OS 12.2.2 and later). See [Configure Advanced Forwarding Settings](https://docs.paloaltonetworks.com/advanced-threat-prevention/getting-started/configure-advanced-forwarding-settings).
+5. Configure **Frontier Virtual Patching** within a Vulnerability Protection profile and apply that profile via a security policy rule.
+
+> [!TIP]
+> For the full, screenshot-driven walkthrough of licensing, activation, and configuring the NGFW for ATP Plus / Frontier Virtual Patching, see [Configure the NGFW for ATP Plus (Frontier Virtual Patching)](#configure-the-ngfw-for-atp-plus-frontier-virtual-patching) later in this guide.
 
 ### Producer Components
 
@@ -50,36 +80,21 @@ The supported modes map to the following deployment behaviors:
 * **`ZONAL_AFFINITY_SPILL_CROSS_ZONE`** (zone-based with spillover): Traffic is kept local while enough healthy backends exist in the zone; once the healthy-backend proportion falls below `zonal_affinity_spillover_ratio`, new connections spill over to firewalls in other zones within the region.
 * **`ZONAL_AFFINITY_DISABLED`** (cross-zone): Traffic may be inspected by any firewall within the same region as the traffic's source (the previous behavior).
 
+This deployment uses a **cross-zone architecture with zonal affinity enabled**, which is the recommended option and the default configured by this Terraform plan (<code>ZONAL_AFFINITY_SPILL_CROSS_ZONE</code>). Traffic is inspected by a firewall in the consumer's own zone whenever healthy backends are available there, and automatically spills over to firewalls in other zones within the region when they are not — combining the low latency of zone-local inspection with the resilience of a regional firewall fleet.
+
 <table>
   <tr>
     <!-- Title cell with left alignment -->
-    <th colspan="2" align="left">Zone-Based Deployment (zonal affinity enabled)</th>
-  </tr>
-  <tr>
-    <td width="35%"><img src="images/diagram_zone.png" width="100%"></td>
-    <td width="65%">
-      <ol>
-        <li>Deploy the firewalls to a regional instance group that spans every zone in the region.</li>
-        <li>Add the instance group to a backend service and enable <b>zonal affinity</b> (<code>ZONAL_AFFINITY_STAY_WITHIN_ZONE</code> or <code>ZONAL_AFFINITY_SPILL_CROSS_ZONE</code>).</li>
-        <li>Create a forwarding rule per zone targeting the backend service.</li>
-        <li>Link each forwarding rule to an intercept/mirroring deployment that matches the zone you are inspecting.</li>
-        <li>Aggregate all zonal deployments into a single deployment group.</li>
-      </ol>
-      <i>Terraform performs steps 3-5 automatically for every zone in <code>var.region</code>.</i>
-    </td>
-  </tr>
-  <tr>
-    <!-- Title cell with left alignment -->
-    <th colspan="2" align="left">Cross-Zone Deployment (zonal affinity disabled)</th>
+    <th colspan="2" align="left">Cross-Zone Deployment (zonal affinity enabled) &mdash; recommended</th>
   </tr>
   <tr>
     <td width="35%"><img src="images/diagram_region.png" width="100%"></td>
     <td width="65%">
       <ol>
-        <li>Deploy the firewalls to a regional instance group matching the source region of the consumer.</li>
-        <li>Add the instance group to a backend service with <code>zonal_affinity_spillover = ZONAL_AFFINITY_DISABLED</code>.</li>
+        <li>Deploy the firewalls to a regional instance group that spans every zone in the region.</li>
+        <li>Add the instance group to a backend service and enable <b>zonal affinity</b> (<code>zonal_affinity_spillover = ZONAL_AFFINITY_SPILL_CROSS_ZONE</code>), so traffic stays zone-local but can spill cross-zone when needed.</li>
         <li>Create a forwarding rule per zone targeting the backend service.</li>
-        <li>Link each forwarding rule to an intercept/mirroring deployment matching the zone you wish to inspect.</li>
+        <li>Link each forwarding rule to an intercept/mirroring deployment that matches the zone you are inspecting.</li>
         <li>Aggregate all zonal deployments into a single deployment group.</li>
       </ol>
       <i>Terraform performs steps 3-5 automatically for every zone in <code>var.region</code>.</i>
@@ -330,66 +345,6 @@ In the `consumer` directory, use the terraform plan to create a consumer environ
 
 <br>
 
-## Test Inspection
-
-Test inspection by generating pseudo-malicious traffic between VMs and also between VMs and the internet.  Then, generate pseudo-malicious traffic within the GKE cluster (`cluster1`) to test pod-to-pod inspection.
-
-### GCE Inspection
-Simulate pseudo-malicious traffic for both east-west and north-south traffic flows.
-
-1. In Cloud Shell, remotely generate pseudo-malicious traffic on the `client-vm` to simulate malicious traffic to the `web-vm` (east/west) and to the `internet` (north/south).
-
-    ```
-    gcloud compute ssh $CLIENT_VM \
-        --zone $ZONE \
-        --tunnel-through-iap \
-        --command="bash -s" << 'EOF'
-    curl -s -o /dev/null -w "%{http_code}\n" http://www.eicar.org/cgi-bin/.%2e/.%2e/.%2e/.%2e/bin/sh --data "echo Content-Type: text/plain; echo; uname -a" --max-time 2
-    curl -s -o /dev/null -w "%{http_code}\n" http://www.eicar.org/cgi-bin/user.sh -H "FakeHeader:() { :; }; echo Content-Type: text/html; echo ; /bin/uname -a" --max-time 2
-    curl -s -o /dev/null -w "%{http_code}\n" http://10.1.0.20/cgi-bin/user.sh -H "FakeHeader:() { :; }; echo Content-Type: text/html; echo ; /bin/uname -a" --max-time 2
-    curl -s -o /dev/null -w "%{http_code}\n" http://10.1.0.20/cgi-bin/.%2e/.%2e/.%2e/.%2e/etc/passwd --max-time 2
-    EOF
-    ```
-
-    (output)
-    
-    <pre>
-    <b>000
-    000 
-    000
-    000</b></pre>
-
-    > The `000` response codes indicate that the traffic was blocked by the producer. 
-    > The *out-of-band* deployment will not produce `000` response codes since it is only monitoring the traffic.
-
-
-2. Retrieve the firewall’s management address.
-
-    ```
-    gcloud compute instances list \
-        --filter='tags.items=(panw-tutorial)' \
-        --format='table[box,title="Firewall MGMT"](networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP, networkInterfaces[0].networkIP:label=INTERNAL_IP)'
-    ```
-
-3. Access the firewall’s web interface using the management address.
-
-    <pre>
-    https://<b><i>MGMT_ADDRESS</i></b></pre>
-    Username:
-    ```
-    admin
-    ```
-    Password:
-    ```
-    PaloAlto@123
-    ```
----
-
-4. On the firewall, go to **Monitor → Threat** to confirm the firewall prevented the north/south and east/west threats generated by the `client-vm` .
-
-    <img src="images/threat_gce.png" width="100%">
-
-<br>
 
 
 # Configure the NGFW for ATP Plus (Frontier Virtual Patching)
